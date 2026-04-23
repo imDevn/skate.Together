@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
+import { createClient } from "@/utils/supabase/client";
 import type { Session } from "@/types/Session";
 import SessionCard from "@/components/SessionCard";
 import GoogleSignInButton from "@/components/GoogleSignInButton";
@@ -77,10 +78,10 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
 
     const newSession: Session = {
       id: now,
-      createdByUserId: CURRENT_USER_ID,
-      participants: [CURRENT_USER_ID],
-      name: "You",
-      eaId: "your_ea_id_here",
+      createdByUserId: user.id,
+      participants: [user.id],
+      name: profile.nickname,
+      eaId: profile.ea_id,
       note: note.trim() || "Looking for a SKATE session",
       tags: selectedTags,
       style: selectedTags.includes("arcade") ? "arcade" : "realistic",
@@ -107,7 +108,7 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
           ? {
               ...session,
               status: "playing",
-              participants: [...session.participants, CURRENT_USER_ID],
+              participants: [...session.participants, user.id],
             }
           : session
       )
@@ -124,7 +125,7 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
               ...session,
               status: "waiting",
               participants: session.participants.filter(
-                (id) => id !== CURRENT_USER_ID
+                (id) => id !== user.id
               ),
             }
           : session
@@ -189,7 +190,7 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
       : null;
       
   const isHost =
-    activeSession !== null && activeSession.createdByUserId === CURRENT_USER_ID;
+    activeSession !== null && activeSession.createdByUserId === user.id;
 
   return (
 		<div>
