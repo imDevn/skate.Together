@@ -22,8 +22,8 @@ const SESSION_LIFETIME = 10 * 60 * 1000;
 const initialSessions: Session[] = [
   {
     id: 1,
-    createdByUserId: 1,
-    participants: [1],
+    createdByUserId: "999",
+    participants: ["999"],
     name: "Devan",
     eaId: "devan_ferreira",
     note: "realistic rails",
@@ -36,8 +36,8 @@ const initialSessions: Session[] = [
   },
   {
     id: 2,
-    createdByUserId: 2,
-    participants: [2],
+    createdByUserId: "999",
+    participants: ["999"],
     name: "Rookz",
     eaId: "rookz_flipz",
     note: "park or street",
@@ -78,10 +78,10 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
 
     const newSession: Session = {
       id: now,
-      createdByUserId: user.id,
-      participants: [user.id],
-      name: profile.nickname,
-      eaId: profile.ea_id,
+      createdByUserId: user?.id ?? "999",
+      participants: [user?.id ?? "999"],
+      name: profile?.nickname ?? "No nickname is set",
+      eaId: profile?.ea_id ?? "No EA ID is set",
       note: note.trim() || "Looking for a SKATE session",
       tags: selectedTags,
       style: selectedTags.includes("arcade") ? "arcade" : "realistic",
@@ -108,7 +108,7 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
           ? {
               ...session,
               status: "playing",
-              participants: [...session.participants, user.id],
+              participants: [...session.participants, user?.id ?? "999"],
             }
           : session
       )
@@ -125,7 +125,7 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
               ...session,
               status: "waiting",
               participants: session.participants.filter(
-                (id) => id !== user.id
+                (id) => id !== (user?.id ?? "999")
               ),
             }
           : session
@@ -190,7 +190,7 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
       : null;
       
   const isHost =
-    activeSession !== null && activeSession.createdByUserId === user.id;
+    activeSession !== null && activeSession.createdByUserId === (user?.id ?? "999");
 
   return (
 		<div>

@@ -1,4 +1,5 @@
 import type { Session } from "@/types/Session";
+import { createClient } from "@/utils/supabase/client";
 
 type SessionCardProps = {
 	session: Session;
