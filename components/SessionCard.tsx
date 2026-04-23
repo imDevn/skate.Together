@@ -6,9 +6,10 @@ type SessionCardProps = {
 	onLeave?: () => void;
 	isUserInSession: boolean;
 	time: string;
+  disabled?: boolean;
 };
 
-export default function SessionCard({ session, onJoin, onLeave, isUserInSession, time }: SessionCardProps) {
+export default function SessionCard({ session, onJoin, onLeave, isUserInSession, time, disabled }: SessionCardProps) {
   return (
     <article className="session">
       <div>
@@ -39,10 +40,27 @@ export default function SessionCard({ session, onJoin, onLeave, isUserInSession,
       {session.status === "waiting" ? (
         <button
           className="btn btn-success"
-          onClick={() => onJoin(session.id)}
-          disabled={isUserInSession}
+          onClick={() => {
+            if (disabled) {
+              // trigger Google login
+              const supabase = createClient();
+              supabase.auth.signInWithOAuth({
+                provider: "google",
+                options: {
+                  redirectTo: `${window.location.origin}/auth/callback`,
+                },
+              });
+              return;
+            }
+
+            onJoin(session.id);
+          }}
         >
-          {isUserInSession ? "Already in session" : "Join Session"}
+          {!disabled
+            ? isUserInSession
+              ? "Already in session"
+              : "Join Session"
+            : "Sign in to join"}
         </button>
       ) : (
         <button className="btn" disabled>
