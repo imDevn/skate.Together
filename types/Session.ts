@@ -1,6 +1,6 @@
 export type Session = {
 	id: number;
-  createdByUserId: number;
+  createdByUserId: string;
   participants: number[];
 	name: string;
 	eaId: string;
