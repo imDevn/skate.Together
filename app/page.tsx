@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import Session from "@/types/Session";
+import type { Session } from "@/types/Session";
 import SessionCard from "@/components/SessionCard";
 
 // Debug variables
