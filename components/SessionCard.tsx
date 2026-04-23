@@ -1,4 +1,4 @@
-import Session from "@/types/Session";
+import type { Session } from "@/types/Session";
 
 type SessionCardProps = {
 	session: Session;
