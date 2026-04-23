@@ -1,0 +1,7 @@
+{
+    "eslint.format.enable": true,
+    "editor.defaultFormatter": null,
+    "[typescriptreact]": {
+        "editor.defaultFormatter": "rvest.vs-code-prettier-eslint"
+    }
+}

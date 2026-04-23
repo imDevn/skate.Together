@@ -1,14 +1,12 @@
 export type Session = {
-	id: number;
-  createdByUserId: string;
-  participants: string[];
-	name: string;
-	eaId: string;
-	note: string;
-	tags: string[];
-  style: "realistic" | "arcade";
-	time: string;
+	id: string;
+	created_by_user_id: string;
+	created_by_nickname: string;
+	created_by_ea_id: string;
+	note: string | null;
+	style: "realistic" | "arcade";
 	status: "waiting" | "playing" | "ended";
-  createdAt: number;
-  expiresAt: number;
-};
+	participants_count: number;
+	created_at: string;
+	expires_at: string;
+  };

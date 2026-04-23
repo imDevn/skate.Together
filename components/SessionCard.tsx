@@ -2,73 +2,65 @@ import type { Session } from "@/types/Session";
 import { createClient } from "@/utils/supabase/client";
 
 type SessionCardProps = {
-	session: Session;
-	onJoin: (id: number) => void;
-	onLeave?: () => void;
-	isUserInSession: boolean;
-	time: string;
+  session: Session;
+  onJoin: (id: string) => void;
+  isUserInSession: boolean;
+  time: string;
   disabled?: boolean;
 };
 
-export default function SessionCard({ session, onJoin, onLeave, isUserInSession, time, disabled }: SessionCardProps) {
+export default function SessionCard({ session, onJoin, isUserInSession, time, disabled }: SessionCardProps) {
   return (
     <article className="session">
       <div>
         <div className="session-top">
           <div className="avatar">
-            {session.name.slice(0, 2).toUpperCase()}
+            {session.created_by_nickname.slice(0, 2).toUpperCase()}
           </div>
           <div>
-            <div className="name">{session.name}</div>
-            <div className="tiny">EA ID: {session.eaId}</div>
+            <div className="name">{session.created_by_nickname}</div>
+            <div className="tiny">
+              Style: {session.style} • Players: {session.participants_count}
+            </div>
           </div>
         </div>
 
-        <div className="muted">{session.note}</div>
-
-        <div className="tags">
-          {session.tags.map((tag) => (
-            <span key={tag} className="tag">
-              {tag}
-            </span>
-          ))}
-        </div>
+        <div className="muted">{session.note || "No note provided."}</div>
       </div>
 
-		<div className="session-actions">
-      <div className="time-live">Live for {time}</div>
+      <div className="session-actions">
+        <div className="time-live">Live for {time}</div>
 
-      {session.status === "waiting" ? (
-        <button
-          className="btn btn-success"
-          onClick={() => {
-            if (disabled) {
-              // trigger Google login
-              const supabase = createClient();
-              supabase.auth.signInWithOAuth({
-                provider: "google",
-                options: {
-                  redirectTo: `${window.location.origin}/auth/callback`,
-                },
-              });
-              return;
-            }
+        {session.status === "waiting" ? (
+          <button
+            className="btn btn-success"
+            onClick={() => {
+              if (disabled) {
+                const supabase = createClient();
+                supabase.auth.signInWithOAuth({
+                  provider: "google",
+                  options: {
+                    redirectTo: `${window.location.origin}/auth/callback`,
+                  },
+                });
+                return;
+              }
 
-            onJoin(session.id);
-          }}
-        >
-          {!disabled
-            ? isUserInSession
+              onJoin(session.id);
+            }}
+          >
+            {disabled
+              ? "Sign in to join"
+              : isUserInSession
               ? "Already in session"
-              : "Join Session"
-            : "Sign in to join"}
-        </button>
-      ) : (
-        <button className="btn" disabled>
-          In Progress
-        </button>
-      )}
-    </div>
+              : "Join Session"}
+          </button>
+        ) : (
+          <button className="btn" disabled>
+            In Progress
+          </button>
+        )}
+      </div>
     </article>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/utils/supabase/client";
 import type { Session } from "@/types/Session";
@@ -16,44 +16,16 @@ type HomePageClientProps = {
   } | null;
 };
 
-const NOW = 1700000000000;
-const SESSION_LIFETIME = 10 * 60 * 1000;
+const SESSION_LIFETIME_MS = 10 * 60 * 1000;
 
-const initialSessions: Session[] = [
-  {
-    id: 1,
-    createdByUserId: "999",
-    participants: ["999"],
-    name: "Devan",
-    eaId: "devan_ferreira",
-    note: "realistic rails",
-    tags: ["realistic"],
-    style: "realistic",
-    time: "2 min",
-    status: "waiting",
-    createdAt: NOW - 2 * 60 * 1000,
-    expiresAt: NOW - 2 * 60 * 1000 + SESSION_LIFETIME,
-  },
-  {
-    id: 2,
-    createdByUserId: "999",
-    participants: ["999"],
-    name: "Rookz",
-    eaId: "rookz_flipz",
-    note: "park or street",
-    tags: ["arcade"],
-    style: "arcade",
-    time: "5 min",
-    status: "waiting",
-    createdAt: NOW - 4 * 60 * 1000,
-    expiresAt: NOW - 4 * 60 * 1000 + SESSION_LIFETIME,
-  },
-];
+const supabase = createClient();
 
 export default function HomePageClient({ user, profile }: HomePageClientProps) {
-  const [sessions, setSessions] = useState<Session[]>(initialSessions);
-  const [hasMounted, setHasMounted] = useState(false);
-  const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [loadingSessions, setLoadingSessions] = useState(true);
+  const [refreshingSessions, setRefreshingSessions] = useState(false);
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
   const [note, setNote] = useState("");
 	const [selectedTags, setSelectedTags] = useState<string[]>([
@@ -72,32 +44,95 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
 				: [...current, tag]
 		);
 	};
+
+  const loadSessions = useCallback(
+    async (showSpinner = true) => {
+      if (showSpinner) {
+        setRefreshingSessions(true);
+      }
+  
+      setSessionsError(null);
+  
+      const now = new Date().toISOString();
+  
+      const { data, error } = await supabase
+        .from("sessions")
+        .select("*")
+        .neq("status", "ended")
+        .gt("expires_at", now)
+        .order("created_at", { ascending: false });
+  
+      if (error) {
+        setSessionsError(error.message);
+        if (showSpinner) {
+          setRefreshingSessions(false);
+        }
+        setLoadingSessions(false);
+        return;
+      }
+  
+      setSessions(data ?? []);
+      if (showSpinner) {
+        setRefreshingSessions(false);
+      }
+      setLoadingSessions(false);
+    }, []
+  );
+
+  // Load sessions on first mount
+  useEffect(() => {
+    void loadSessions();
+  }, [loadSessions]);
+
+  // Auto-refresh every minute
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadSessions(false);
+    }, 60_000);
+  
+    return () => clearInterval(interval);
+  }, [loadSessions]);
 	
-	const handleGoLive = () => {
-    const now = Date.now();
-
-    const newSession: Session = {
-      id: now,
-      createdByUserId: user?.id ?? "999",
-      participants: [user?.id ?? "999"],
-      name: profile?.nickname ?? "No nickname is set",
-      eaId: profile?.ea_id ?? "No EA ID is set",
-      note: note.trim() || "Looking for a SKATE session",
-      tags: selectedTags,
-      style: selectedTags.includes("arcade") ? "arcade" : "realistic",
-      time: "just now",
+	const handleGoLive = async () => {
+    if (!user) {
+      return;
+    }
+  
+    if (!profile?.nickname || !profile?.ea_id) {
+      alert("Please finish setting up your profile before posting a session.");
+      return;
+    }
+  
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + SESSION_LIFETIME_MS).toISOString();
+  
+    const style =
+      selectedTags.includes("arcade") ? "arcade" : "realistic";
+  
+    const { error } = await supabase.from("sessions").insert({
+      created_by_user_id: user.id,
+      created_by_nickname: profile.nickname,
+      created_by_ea_id: profile.ea_id,
+      note: note.trim() || null,
+      style,
       status: "waiting",
-      createdAt: now,
-      expiresAt: now + SESSION_LIFETIME,
-    };
-
-    setSessions((current) => [newSession, ...current]);
-    setActiveSessionId(newSession.id);
+      participants_count: 1,
+      expires_at: expiresAt,
+    });
+  
+    if (error) {
+      console.error("Failed to create session:", error);
+      alert("Could not create session. Check the console for details.");
+      return;
+    }
+  
     setNote("");
     setSelectedTags(["realistic"]);
+  
+    await loadSessions();
   };
 	
-	const handleJoinSession = (id: number) => {
+	const handleJoinSession = (id: string) => {
     if (activeSessionId !== null) {
       return;
     }
@@ -108,7 +143,7 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
           ? {
               ...session,
               status: "playing",
-              participants: [...session.participants, user?.id ?? "999"],
+              participants: session.participants_count,
             }
           : session
       )
@@ -124,9 +159,7 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
           ? {
               ...session,
               status: "waiting",
-              participants: session.participants.filter(
-                (id) => id !== (user?.id ?? "999")
-              ),
+              participants: session.participants_count,
             }
           : session
       )
@@ -143,46 +176,15 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
     setActiveSessionId(null);
   };
 	
-	const getTimeSince = (createdAt: number) => {
-	  const seconds = Math.floor((Date.now() - createdAt) / 1000);
-
-	  if (seconds < 60) return "just now";
-	  if (seconds < 3600) return `${Math.floor(seconds / 60)} min`;
-	  return `${Math.floor(seconds / 3600)} hr`;
-	};
-	
-  // Expiration system
-	useEffect(() => {
-    const interval = setInterval(() => {
-      setSessions((current) =>
-        current.filter((session) => Date.now() < session.expiresAt)
-      );
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, []);
+	const getTimeSince = (createdAt: string) => {
+    const seconds = Math.floor(
+      (Date.now() - new Date(createdAt).getTime()) / 1000
+    );
   
-  // Load localStorage after mount
-  useEffect(() => {
-    setHasMounted(true);
-
-    const savedSessions = localStorage.getItem("sessions");
-
-    if (!savedSessions) return;
-
-    try {
-      setSessions(JSON.parse(savedSessions));
-    } catch {
-      // ignore bad saved data and keep defaults
-    }
-  }, []);
-  
-  // Persistence system
-  useEffect(() => {
-    if (!hasMounted)
-      return;
-    localStorage.setItem("sessions", JSON.stringify(sessions));
-  }, [sessions, hasMounted]);
+    if (seconds < 60) return "just now";
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} min`;
+    return `${Math.floor(seconds / 3600)} hr`;
+  };
 	
   const activeSession =
     activeSessionId !== null
@@ -190,7 +192,7 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
       : null;
       
   const isHost =
-    activeSession !== null && activeSession.createdByUserId === (user?.id ?? "999");
+    activeSession !== null && activeSession.created_by_user_id === (user?.id ?? "999");
 
   return (
 		<div>
@@ -283,10 +285,10 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
                 <div className="profile">
                   <div className="profile-top">
                     <div className="avatar large">
-                      {activeSession.name.slice(0, 1).toUpperCase()}
+                      {activeSession.created_by_nickname.slice(0, 1).toUpperCase()}
                     </div>
                     <div>
-                      <div className="name">{activeSession.name}</div>
+                      <div className="name">{activeSession.created_by_nickname}</div>
                       <div className="tiny">
                         Role: {isHost ? "Host" : "Participant"}
                       </div>
@@ -299,11 +301,11 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
 
                   <div className="split-stats">
                     <div className="mini">
-                      <div className="num">{activeSession.participants.length}</div>
+                      <div className="num">{activeSession.participants_count}</div>
                       <div className="tiny">Participants</div>
                     </div>
                     <div className="mini">
-                      <div className="num">{hasMounted ? getTimeSince(activeSession.createdAt) : activeSession.time}</div>
+                      <div className="num">{getTimeSince(activeSession.created_at)}</div>
                       <div className="tiny">Live For</div>
                     </div>
                   </div>
@@ -333,25 +335,35 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
                   <h2>Active SKATE Sessions</h2>
                   <div className="muted">Session posts expire after 10 minutes.</div>
                 </div>
-                <button className="btn">Refresh</button>
+                <button className="btn" onClick={() => loadSessions()}>
+                  {refreshingSessions ? "Refreshing..." : "Refresh"}
+                </button>
               </div>
 
-              <div className="session-list">
-                {sessions
-                  .filter((session) => session.status === "waiting")
-                  .map((session) => (
+              {sessionsError && (
+                <div className="banner">
+                  Could not load sessions: {sessionsError}
+                </div>
+              )}
+
+              {loadingSessions ? (
+                <div className="muted">Loading sessions...</div>
+              ) : sessions.length === 0 ? (
+                <div className="muted">No active sessions right now.</div>
+              ) : (
+                <div className="session-list">
+                  {sessions.map((session) => (
                     <SessionCard
                       key={session.id}
                       session={session}
                       onJoin={handleJoinSession}
-                      onLeave={handleLeaveSession}
                       isUserInSession={activeSessionId !== null}
-                      time={hasMounted ? getTimeSince(session.createdAt) : session.time}
+                      time={getTimeSince(session.created_at)}
                       disabled={!user}
                     />
-                  ))
-                }
-              </div>
+                  ))}
+                </div>
+              )}
             </section>
 				  </main>
 
@@ -360,7 +372,7 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
               <div className="section-head">
               <div>
                 <h2>Start a Session</h2>
-                <div className="muted">Don't see anything you like? Make your own posting to let skaters with similar tastes find you!</div>
+                <div className="muted">Don&apos;t see anything you like? Make your own posting to let skaters with similar tastes find you!</div>
               </div>
               </div>
 
