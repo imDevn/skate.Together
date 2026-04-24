@@ -8,12 +8,14 @@ type ProfileSetupFormProps = {
   userId: string;
   initialNickname: string;
   initialEaId: string;
+  redirectAfterSave: string;
 };
 
 export default function ProfileSetupForm({
   userId,
   initialNickname,
   initialEaId,
+  redirectAfterSave,
 }: ProfileSetupFormProps) {
   const router = useRouter();
 
@@ -57,7 +59,7 @@ export default function ProfileSetupForm({
 
     setMessage("Profile saved.");
     setSaving(false);
-    router.push("/");
+    router.push(redirectAfterSave);
     router.refresh();
   };
 

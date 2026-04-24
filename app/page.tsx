@@ -1,4 +1,3 @@
-import { redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
 import HomePageClient from "@/components/HomePageClient";
 
@@ -19,12 +18,6 @@ export default async function Home() {
       .maybeSingle();
 
     profile = data;
-
-    const missingProfile = !profile || !profile.nickname || !profile.ea_id;
-
-    if (missingProfile) {
-      redirect("/profile/setup");
-    }
   }
 
   return <HomePageClient user={user} profile={profile} />;

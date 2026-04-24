@@ -5,6 +5,7 @@ import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/utils/supabase/client";
 import type { Session } from "@/types/Session";
 import SessionCard from "@/components/SessionCard";
+import ProfileSetupModal from "@/components/ProfileSetupModal";
 import GoogleSignInButton from "@/components/GoogleSignInButton";
 import LogoutButton from "@/components/LogoutButton";
 
@@ -26,6 +27,8 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
   const [refreshingSessions, setRefreshingSessions] = useState(false);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [playersOnline, setPlayersOnline] = useState(0);
+  const [sessionModal, setSessionModal] = useState<Session | null>(null);
 
   const [note, setNote] = useState("");
 	const [selectedTags, setSelectedTags] = useState<string[]>([
@@ -59,7 +62,7 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
         .from("sessions")
         .select("*")
         .neq("status", "ended")
-        .gt("expires_at", now)
+        .or(`expires_at.gt.${now},status.eq.playing`)
         .order("created_at", { ascending: false });
   
       if (error) {
@@ -81,6 +84,7 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
 
   // Load sessions on first mount
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadSessions();
   }, [loadSessions]);
 
@@ -109,48 +113,93 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
     const style =
       selectedTags.includes("arcade") ? "arcade" : "realistic";
   
-    const { error } = await supabase.from("sessions").insert({
-      created_by_user_id: user.id,
-      created_by_nickname: profile.nickname,
-      created_by_ea_id: profile.ea_id,
-      note: note.trim() || null,
-      style,
-      status: "waiting",
-      participants_count: 1,
-      expires_at: expiresAt,
-    });
+    const { data, error } = await supabase
+      .from("sessions")
+      .insert({
+        created_by_user_id: user.id,
+        created_by_nickname: profile.nickname,
+        created_by_ea_id: profile.ea_id,
+        note: note.trim() || null,
+        style,
+        status: "waiting",
+        participants_count: 1,
+        expires_at: expiresAt,
+      })
+      .select()
+      .single();
   
     if (error) {
       console.error("Failed to create session:", error);
       alert("Could not create session. Check the console for details.");
       return;
     }
-  
+    
+    setActiveSessionId(data.id);
     setNote("");
     setSelectedTags(["realistic"]);
   
     await loadSessions();
   };
 	
-	const handleJoinSession = (id: string) => {
-    if (activeSessionId !== null) {
+	const handleJoinSession = async (id: string) => {
+    if (!user || !profile?.nickname || !profile?.ea_id) return;
+    if (activeSessionId !== null) return;
+
+    const { data, error } = await supabase
+      .from("sessions")
+      .update({
+        status: "playing",
+        joined_by_user_id: user.id,
+        joined_by_nickname: profile.nickname,
+        joined_by_ea_id: profile.ea_id,
+        participants_count: 2,
+      })
+      .eq("id", id)
+      .eq("status", "waiting")
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Failed to join session:", error);
+      alert("Could not join session.");
       return;
     }
 
-    setSessions((current) =>
-      current.map((session) =>
-        session.id === id
-          ? {
-              ...session,
-              status: "playing",
-              participants: session.participants_count,
-            }
-          : session
-      )
-    );
-
     setActiveSessionId(id);
+    setSessionModal(data);
+    await loadSessions();
   };
+
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase
+      .channel("creator-session-updates")
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "sessions",
+          filter: `created_by_user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          const updatedSession = payload.new as Session;
+  
+          if (
+            updatedSession.status === "playing" &&
+            updatedSession.joined_by_user_id
+          ) {
+            setActiveSessionId(updatedSession.id);
+            setSessionModal(updatedSession);
+            void loadSessions(false);
+          }
+        }
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [user, loadSessions]);
 	
 	const handleLeaveSession = () => {
     setSessions((current) =>
@@ -168,16 +217,27 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
     setActiveSessionId(null);
   };
   
-  const handleEndSession = () => {
-    setSessions((current) =>
-      current.filter((session) => session.id !== activeSessionId)
-    );
+  const handleEndSession = async () => {
+    if (!activeSessionId) return;
+    
+    const { error } = await supabase
+      .from("sessions")
+      .update({ status: "ended" })
+      .eq("id", activeSessionId);
+
+    if (error) {
+      console.error("Failed to end session:", error);
+      alert("Could not end session.");
+      return;
+    }
 
     setActiveSessionId(null);
+    await loadSessions();
   };
 	
 	const getTimeSince = (createdAt: string) => {
     const seconds = Math.floor(
+      // eslint-disable-next-line react-hooks/purity
       (Date.now() - new Date(createdAt).getTime()) / 1000
     );
   
@@ -186,17 +246,80 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
     return `${Math.floor(seconds / 3600)} hr`;
   };
 	
-  const activeSession =
-    activeSessionId !== null
+  const activeSession = activeSessionId !== null
       ? sessions.find((session) => session.id === activeSessionId) ?? null
       : null;
       
-  const isHost =
-    activeSession !== null && activeSession.created_by_user_id === (user?.id ?? "999");
+  const isHost = activeSession !== null && activeSession.created_by_user_id === (user?.id ?? "999");
+
+  const refreshOnlineCount = useCallback(async () => {
+    const { data, error } = await supabase.rpc("get_online_player_count");
+  
+    if (!error && typeof data === "number") {
+      setPlayersOnline(data);
+    }
+  }, []);
+
+  useEffect(() => {
+    const updatePresence = async () => {
+      if (user) {
+        await supabase
+          .from("profiles")
+          .update({ last_seen_at: new Date().toISOString() })
+          .eq("id", user.id);
+      }
+  
+      await refreshOnlineCount();
+    };
+  
+    void updatePresence();
+  
+    const interval = setInterval(() => {
+      void updatePresence();
+    }, 60_000);
+  
+    return () => clearInterval(interval);
+  }, [user, refreshOnlineCount]);
 
   return (
 		<div>
 			<div className="wrap">
+        <div id="modal-container">
+          {user && (!profile?.nickname || !profile?.ea_id) && (
+            <ProfileSetupModal
+              userId={user.id}
+              initialNickname={profile?.nickname ?? ""}
+              initialEaId={profile?.ea_id ?? ""}
+            />
+          )}
+
+          {sessionModal && (
+            <div className="modal-backdrop">
+              <div className="card section modal-card">
+                <h2>Session Ready</h2>
+                <p className="muted">
+                  Add each other in-game using EA ID.
+                </p>
+                <div className="banner">
+                  <strong>Host</strong>
+                  <div>{sessionModal.created_by_nickname}</div>
+                  <div>EA ID: {sessionModal.created_by_ea_id}</div>
+                </div>
+                {sessionModal.joined_by_nickname && (
+                  <div className="banner">
+                    <strong>Joined Player</strong>
+                    <div>{sessionModal.joined_by_nickname}</div>
+                    <div>EA ID: {sessionModal.joined_by_ea_id}</div>
+                  </div>
+                )}
+                <button className="btn btn-primary" onClick={() => setSessionModal(null)}>
+                  Got it
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
 				<header className="topbar">
 				  <div className="brand">
             <div className="brand-badge">S</div>
@@ -206,8 +329,6 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
             </div>
 				  </div>
 				  <nav className="nav">
-            <a className="pill" href="#active-sessions">Active Sessions</a>
-            <a className="pill" href="#start-session">Start Session</a>
             {user ? (
               <>
                 <a className="pill" href="#profile">
@@ -255,7 +376,7 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
               </div>
               <div className="stat">
                 <div className="label">Players Online</div>
-                <div className="value">0</div>
+                <div className="value">{playersOnline}</div>
               </div>
               <div className="stat">
                 <div className="label">Sessions Played Today</div>
@@ -310,11 +431,26 @@ export default function HomePageClient({ user, profile }: HomePageClientProps) {
                     </div>
                   </div>
 
-                  <div className="muted">{activeSession.note}</div>
+                  {activeSession.note && (
+                    <div className="muted">{activeSession.note}</div>
+                  )}
 
                   <div className="banner">
-                    Multiple players will be supported soon. For now, if you want to play with more people,
-                    you can end this session and create another one.
+                    <strong>Participants</strong>
+
+                    <div className="tiny">
+                      Host: {activeSession.created_by_nickname} — EA ID: {activeSession.created_by_ea_id}
+                    </div>
+
+                    {activeSession.joined_by_nickname && activeSession.joined_by_ea_id ? (
+                      <div className="tiny">
+                        Joined: {activeSession.joined_by_nickname} — EA ID: {activeSession.joined_by_ea_id}
+                      </div>
+                    ) : (
+                      <div className="tiny">
+                        Waiting for another player to join.
+                      </div>
+                    )}
                   </div>
 
                   <div className="hero-actions">

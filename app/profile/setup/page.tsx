@@ -39,6 +39,7 @@ export default async function ProfileSetupPage() {
           userId={user.id}
           initialNickname={profile?.nickname ?? ""}
           initialEaId={profile?.ea_id ?? ""}
+          redirectAfterSave="/"
         />
       </section>
     </div>
